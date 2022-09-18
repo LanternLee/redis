@@ -1179,6 +1179,7 @@ void zsetConvert(robj *zobj, int encoding) {
     if (zobj->encoding == encoding) return;
     if (zobj->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl = zobj->ptr;
+        int zobj_len = zsetLength(zobj);
         unsigned char *eptr, *sptr;
         unsigned char *vstr;
         unsigned int vlen;
@@ -1190,25 +1191,25 @@ void zsetConvert(robj *zobj, int encoding) {
         zs = zmalloc(sizeof(*zs));
         zs->dict = dictCreate(&zsetDictType,NULL);
         zs->zsl = zslCreate();
+        if (zobj_len != 0) {
+            eptr = ziplistIndex(zl,0);
+            serverAssertWithInfo(NULL,zobj,eptr != NULL);
+            sptr = ziplistNext(zl,eptr);
+            serverAssertWithInfo(NULL,zobj,sptr != NULL);
 
-        eptr = ziplistIndex(zl,0);
-        serverAssertWithInfo(NULL,zobj,eptr != NULL);
-        sptr = ziplistNext(zl,eptr);
-        serverAssertWithInfo(NULL,zobj,sptr != NULL);
+            while (eptr != NULL) {
+                score = zzlGetScore(sptr);
+                serverAssertWithInfo(NULL,zobj,ziplistGet(eptr,&vstr,&vlen,&vlong));
+                if (vstr == NULL)
+                    ele = sdsfromlonglong(vlong);
+                else
+                    ele = sdsnewlen((char*)vstr,vlen);
 
-        while (eptr != NULL) {
-            score = zzlGetScore(sptr);
-            serverAssertWithInfo(NULL,zobj,ziplistGet(eptr,&vstr,&vlen,&vlong));
-            if (vstr == NULL)
-                ele = sdsfromlonglong(vlong);
-            else
-                ele = sdsnewlen((char*)vstr,vlen);
-
-            node = zslInsert(zs->zsl,score,ele);
-            serverAssert(dictAdd(zs->dict,ele,&node->score) == DICT_OK);
-            zzlNext(zl,&eptr,&sptr);
+                node = zslInsert(zs->zsl,score,ele);
+                serverAssert(dictAdd(zs->dict,ele,&node->score) == DICT_OK);
+                zzlNext(zl,&eptr,&sptr);
+            }
         }
-
         zfree(zobj->ptr);
         zobj->ptr = zs;
         zobj->encoding = OBJ_ENCODING_SKIPLIST;
@@ -1825,7 +1826,6 @@ void zaddGenericCommand(client *c, int flags) {
         score = newscore;
     }
     server.dirty += (added+updated);
-
 reply_to_client:
     if (incr) { /* ZINCRBY or INCR option. */
         if (processed)
@@ -1853,6 +1853,11 @@ void zincrbyCommand(client *c) {
     zaddGenericCommand(c,ZADD_IN_INCR);
 }
 
+size_t _zsetLength_(redisDb *db, robj *key, robj* zobj) {
+    objectMeta *m = lookupMeta(db, key);
+    return (m ? m->len : 0) + zsetLength(zobj);
+}
+
 void zremCommand(client *c) {
     robj *key = c->argv[1];
     robj *zobj;
@@ -1863,7 +1868,7 @@ void zremCommand(client *c) {
 
     for (j = 2; j < c->argc; j++) {
         if (zsetDel(zobj,c->argv[j]->ptr)) deleted++;
-        if (zsetLength(zobj) == 0) {
+        if (_zsetLength_(c->db, key, zobj) == 0) {
             dbDelete(c->db,key);
             keyremoved = 1;
             break;
@@ -1954,7 +1959,7 @@ void zremrangeGenericCommand(client *c, zrange_type rangetype) {
             zobj->ptr = zzlDeleteRangeByLex(zobj->ptr,&lexrange,&deleted);
             break;
         }
-        if (zzlLength(zobj->ptr) == 0) {
+        if (_zsetLength_(c->db, key, zobj) == 0 ) {
             dbDelete(c->db,key);
             keyremoved = 1;
         }
@@ -1973,7 +1978,7 @@ void zremrangeGenericCommand(client *c, zrange_type rangetype) {
             break;
         }
         if (htNeedsResize(zs->dict)) dictResize(zs->dict);
-        if (dictSize(zs->dict) == 0) {
+        if (_zsetLength_(c->db, key, zobj) == 0) {
             dbDelete(c->db,key);
             keyremoved = 1;
         }
@@ -3908,7 +3913,7 @@ void genericZpopCommand(client *c, robj **keyv, int keyc, int where, int emitkey
         ++result_count;
 
         /* Remove the key, if indeed needed. */
-        if (zsetLength(zobj) == 0) {
+        if (_zsetLength_(c->db, key, zobj) == 0) {
             dbDelete(c->db,key);
             notifyKeyspaceEvent(NOTIFY_GENERIC,"del",key,c->db->id);
             break;

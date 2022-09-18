@@ -30,11 +30,12 @@ set swap_not_supported {
 }
 
 set ::disk_tests {
+    swap/unit/geo
+    swap/unit/zset
     swap/integration/compact_range
     swap/integration/multi_bighash
-    swap/integration/concurrent
     swap/integration/expire_evict
-    swap/integration/pipeline
+    swap/unit/keyspace
     swap/unit/dirty
     swap/unit/expire
     swap/unit/rdb
@@ -66,7 +67,6 @@ set ::disk_tests {
     unit/type/list
     unit/type/list-2
     unit/type/list-3
-    unit/type/zset
     unit/type/hash
     unit/expire
     unit/multi
@@ -76,7 +76,6 @@ set ::disk_tests {
     unit/introspection-2
     unit/limits
     unit/bitops
-    unit/geo
     unit/hyperloglog
     unit/wait
     unit/pendingquerybuf
@@ -103,7 +102,8 @@ set ::disk_tests {
     integration/redis-benchmark
     integration/rdb
     integration/psync2
-    
+    swap/integration/pipeline
+    swap/integration/concurrent
 }
 
 set ::all_tests {
